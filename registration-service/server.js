@@ -9,7 +9,6 @@ import dotenv from 'dotenv';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app = express();
@@ -35,10 +34,23 @@ const DEFAULT_TARGETS = {
   'document.rdrive': process.env.TARGET_DOCUMENT_RDRIVE || '100.90.20.50:8090',
 };
 
+// Known service -> default port mapping for constructing targets from backendHost
+const SERVICE_PORTS = {
+  rdrive: 3010,
+  rtransfer: 3011,
+  rdrop: 8080,
+  rpictures: 2283,
+  app: 3000,
+  status: 3002,
+  'backend.rdrive': 4000,
+  'connector.rdrive': 5000,
+  'document.rdrive': 8090,
+};
+
 // Utility: append to Caddyfile atomically
 function appendToCaddyfile(content) {
   const current = fs.existsSync(CADDYFILE_PATH) ? fs.readFileSync(CADDYFILE_PATH, 'utf8') : '';
-  const updated = current.endsWith('\n') || current.length === 0 ? current + content : current + '\n' + content;
+  const updated = current.endsWith('\\n') || current.length === 0 ? current + content : current + '\\n' + content;
   fs.writeFileSync(CADDYFILE_PATH, updated, 'utf8');
 }
 
@@ -47,24 +59,51 @@ function isIdUsed(id) {
   try {
     if (!fs.existsSync(CADDYFILE_PATH)) return false;
     const text = fs.readFileSync(CADDYFILE_PATH, 'utf8');
-    const escapedDomain = BASE_DOMAIN.replace(/\./g, '\\.');
-    const re = new RegExp(`\\.${id}\\.${escapedDomain}\\b`);
+    const escapedDomain = BASE_DOMAIN.replace(/\\./g, '\\\\.');
+    const re = new RegExp(`\\\\.${id}\\\\.${escapedDomain}\\\\b`);
     return re.test(text);
   } catch {
     return false;
   }
 }
 
+// Check if backendHost IP already exists in the Caddyfile
+function isBackendHostRegistered(backendHost) {
+  if (!backendHost || !fs.existsSync(CADDYFILE_PATH)) return false;
+
+  const text = fs.readFileSync(CADDYFILE_PATH, 'utf8');
+  const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+
+  // Check if this IP appears in any reverse_proxy directive
+  const re = new RegExp(`reverse_proxy[^\\\\n]*${escapeRegExp(backendHost)}:`, 'i');
+  return re.test(text);
+}
+
+// Find ID associated with a backendHost
+function findIdByBackendHost(backendHost) {
+  if (!backendHost || !fs.existsSync(CADDYFILE_PATH)) return null;
+
+  const text = fs.readFileSync(CADDYFILE_PATH, 'utf8');
+  const escapedDomain = BASE_DOMAIN.replace(/\\./g, '\\\\.');
+  const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+
+  // Look for any block with this IP
+  const re = new RegExp(`\\n[^\\s]+\\.([a-z0-9]{8})\\.${escapedDomain} \\{[\\s\\S]*?reverse_proxy[^\\\\n]*${escapeRegExp(backendHost)}:`, 'i');
+  const m = text.match(re);
+
+  return m && m[1] ? m[1] : null;
+}
+
 function makeSiteBlock(host, target) {
-  return `\n${host} {\n    reverse_proxy ${target}\n}\n`;
+  return `\\n${host} {\\n    reverse_proxy ${target}\\n}\\n`;
 }
 
 function makeSpecialBlock(prefix, host, target) {
   if (prefix === 'backend.rdrive') {
-    return `\n${host} {\n    reverse_proxy /* ${target}\n\n    # Support des WebSockets\n    @websockets {\n        header Connection *Upgrade*\n        header Upgrade websocket\n    }\n    reverse_proxy @websockets ${target}\n}\n`;
+    return `\\n${host} {\\n    reverse_proxy /* ${target}\\n\\n    # Support des WebSockets\\n    @websockets {\\n        header Connection *Upgrade*\\n        header Upgrade websocket\\n    }\\n    reverse_proxy @websockets ${target}\\n}\\n`;
   }
   if (prefix === 'connector.rdrive' || prefix === 'document.rdrive') {
-    return `\n${host} {\n    reverse_proxy /* ${target}\n}\n`;
+    return `\\n${host} {\\n    reverse_proxy /* ${target}\\n}\\n`;
   }
   return null;
 }
@@ -72,68 +111,58 @@ function makeSpecialBlock(prefix, host, target) {
 app.post('/api/register', (req, res) => {
   try {
     const { machineId, arch, os, publicIp, services } = req.body || {};
-    // Allow caller to pass a backend host/IP (e.g., via curl) that we use to form targets per service
+
+    // Allow caller to pass a backend host/IP
     const backendHost = req.body?.backendHost || req.body?.backendIp || req.body?.ip;
 
-    // Utilities for dedup
-    const escapedDomain = BASE_DOMAIN.replace(/\./g, '\\.');
-    const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const getCaddyText = () => (fs.existsSync(CADDYFILE_PATH) ? fs.readFileSync(CADDYFILE_PATH, 'utf8') : '');
-    // Try to find an existing id for this backendHost
-    let id = '';
-    if (backendHost) {
-      const text = getCaddyText();
-      // Match any service label (may contain dots), then a second label that must be exactly 8 lowercase alnum chars (our id)
-      const re = new RegExp(`\n[^\s]+\.([a-z0-9]{8})\.${escapedDomain} \{[\s\S]*?reverse_proxy\s+${escapeRegExp(backendHost)}:`, 'i');
-      const m = text.match(re);
-      if (m && m[1]) {
-        id = m[1];
-      }
-    }
-    // If no existing id found, generate a unique one (attempts up to 5 times)
-    if (!id) {
-      for (let i = 0; i < 5; i++) {
-        const candidate = nanoid(8).toLowerCase();
-        if (!isIdUsed(candidate)) {
-          id = candidate;
-          break;
+    // Check if this backendHost is already registered
+    if (backendHost && isBackendHostRegistered(backendHost)) {
+      const existingId = findIdByBackendHost(backendHost);
+      console.log(`BackendHost ${backendHost} already registered with ID ${existingId}. Skipping.`);
+
+      // Build the domains object for the existing registration
+      const requested = Array.isArray(services)
+        ? services.map((s) => (typeof s === 'string' ? s : s?.name)).filter(Boolean)
+        : ['rdrive'];
+
+      const domains = {};
+      for (const svc of requested) {
+        const prefix = String(svc).toLowerCase();
+        if (existingId) {
+          domains[prefix] = `${prefix}.${existingId}.${BASE_DOMAIN}`;
         }
       }
-      if (!id) {
-        return res.status(500).json({ error: 'id_generation_failed', details: 'Could not generate a unique id' });
+
+      return res.json({
+        id: existingId,
+        status: 'already_exists',
+        message: `BackendHost ${backendHost} is already registered`,
+        domains,
+        received: { machineId, arch, os, publicIp, backendHost }
+      });
+    }
+
+    // Generate a new unique ID
+    let id = '';
+    for (let i = 0; i < 5; i++) {
+      const candidate = nanoid(8).toLowerCase();
+      if (!isIdUsed(candidate)) {
+        id = candidate;
+        break;
       }
+    }
+
+    if (!id) {
+      return res.status(500).json({ error: 'id_generation_failed', details: 'Could not generate a unique id' });
     }
 
     const requested = Array.isArray(services)
       ? services.map((s) => (typeof s === 'string' ? s : s?.name)).filter(Boolean)
       : ['rdrive'];
 
-    // Build domains and targets
+    // Build domains and blocks
     const domains = {};
     const blocks = [];
-    // Known service -> default port mapping for constructing targets from backendHost
-    const SERVICE_PORTS = {
-      rdrive: 3010,
-      rtransfer: 3011,
-      rdrop: 8080,
-      rpictures: 2283,
-      app: 3000,
-      status: 3002,
-      'backend.rdrive': 4000,
-      'connector.rdrive': 5000,
-      'document.rdrive': 8090,
-    };
-
-    // Helper: does a block already exist for this service + id?
-    const caddyTextBefore = getCaddyText();
-    function hasServiceBlock(prefix, idToCheck, expectedHost) {
-      const host = `${prefix}.${idToCheck}.${BASE_DOMAIN}`;
-      const hostRe = new RegExp(`\\n${escapeRegExp(host)} \\{[\\s\\S]*?\\n\\}`, 'i');
-      if (!hostRe.test(caddyTextBefore)) return false;
-      if (!expectedHost) return true;
-      const targetRe = new RegExp(`\\n${escapeRegExp(host)} \\{[\\s\\S]*?reverse_proxy\\s+${escapeRegExp(expectedHost)}(?:\\s|$)`, 'i');
-      return targetRe.test(caddyTextBefore);
-    }
 
     for (const svc of requested) {
       const prefix = String(svc).toLowerCase();
@@ -142,6 +171,7 @@ app.post('/api/register', (req, res) => {
       // Target priority: body.services[].target > backendHost:port (if provided) > DEFAULT_TARGETS
       let target;
       const svcObj = (req.body?.services || []).find((x) => (x?.name || x) === svc);
+
       if (svcObj && svcObj.target) {
         target = svcObj.target;
       } else if (backendHost && SERVICE_PORTS[prefix]) {
@@ -151,34 +181,31 @@ app.post('/api/register', (req, res) => {
       }
 
       if (!target) continue;
+
       domains[prefix] = host;
-      // Skip creating if block already present for this service/id and points to this target (when backendHost provided)
-      if (hasServiceBlock(prefix, id, backendHost ? `${backendHost}:${SERVICE_PORTS[prefix]}` : undefined)) {
-        continue;
-      }
+
       const special = makeSpecialBlock(prefix, host, target);
       blocks.push(special || makeSiteBlock(host, target));
     }
 
-    // If nothing new to write (all requested service blocks already exist for this id/target), return early
-    if (blocks.length === 0) {
-      return res.json({ id, status: 'already_exists', domains });
-    }
-
-    // Write blocks; Caddy is configured to auto-reload on file changes via bind mount
+    // Write blocks only if there are any and this is a new registration
     if (blocks.length > 0) {
-      // Prepend a numbered comment for traceability
-      const preText = getCaddyText();
-      const existingBlockMarkers = (preText.match(/^# BLOCK\s+\d+/gmi) || []).length;
+      const preText = fs.existsSync(CADDYFILE_PATH) ? fs.readFileSync(CADDYFILE_PATH, 'utf8') : '';
+      const existingBlockMarkers = (preText.match(/^# BLOCK\\s+\\d+/gmi) || []).length;
       const blockNumber = existingBlockMarkers + 1;
-      const header = `\n# BLOCK ${blockNumber} - backendHost=${backendHost || 'custom targets'} machineId=${machineId || ''} time=${new Date().toISOString()}\n`;
-      appendToCaddyfile(header + blocks.join('\n'));
-      console.log('Caddyfile updated; Caddy should auto-reload via --watch');
+      const header = `\\n# BLOCK ${blockNumber} - backendHost=${backendHost || 'custom targets'} machineId=${machineId || ''} time=${new Date().toISOString()}\\n`;
+
+      appendToCaddyfile(header + blocks.join('\\n'));
+      console.log(`New registration added for ${backendHost || 'custom targets'}; Caddy should auto-reload via --watch`);
     }
 
-    // Static driss.ryvie.fr blocks removed; only dynamic registrations are written.
+    return res.json({
+      id,
+      domains,
+      status: 'created',
+      received: { machineId, arch, os, publicIp, backendHost }
+    });
 
-    return res.json({ id, domains, received: { machineId, arch, os, publicIp } });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: 'registration_failed', details: String(e) });
