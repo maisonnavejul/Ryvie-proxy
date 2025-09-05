@@ -160,6 +160,11 @@ app.post('/api/register', (req, res) => {
       blocks.push(special || makeSiteBlock(host, target));
     }
 
+    // If nothing new to write (all requested service blocks already exist for this id/target), return early
+    if (blocks.length === 0) {
+      return res.json({ id, status: 'already_exists', domains });
+    }
+
     // Write blocks; Caddy is configured to auto-reload on file changes via bind mount
     if (blocks.length > 0) {
       // Prepend a numbered comment for traceability
