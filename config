@@ -1,0 +1,10 @@
+ip -4 addr show dev wt0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
+curl -X POST http://localhost:8088/api/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "machineId": "abc123",
+    "arch": "amd64",
+    "os": "linux",
+    "backendHost": "100.90.20.50",
+    "services": ["rdrive", "rtransfer", "rdrop", "rpictures"]
+  }'
