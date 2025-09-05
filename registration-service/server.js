@@ -50,12 +50,14 @@ const SERVICE_PORTS = {
 // Utility: append to Caddyfile atomically
 function appendToCaddyfile(content) {
   const current = fs.existsSync(CADDYFILE_PATH) ? fs.readFileSync(CADDYFILE_PATH, 'utf8') : '';
-  // Ensure proper spacing
+
+  // Ensure proper line ending
   let updated = current;
   if (current.length > 0 && !current.endsWith('\\n')) {
     updated += '\\n';
   }
   updated += content;
+
   fs.writeFileSync(CADDYFILE_PATH, updated, 'utf8');
 }
 
@@ -100,29 +102,40 @@ function findIdByBackendHost(backendHost) {
 }
 
 function makeSiteBlock(host, target) {
-  return `${host} {
-    reverse_proxy ${target}
-}`;
+  const lines = [
+    `${host} {`,
+    `    reverse_proxy ${target}`,
+    `}`
+  ];
+  return lines.join('\\n');
 }
 
 function makeSpecialBlock(prefix, host, target) {
   if (prefix === 'backend.rdrive') {
-    return `${host} {
-    reverse_proxy /* ${target}
+    const lines = [
+      `${host} {`,
+      `    reverse_proxy /* ${target}`,
+      ``,
+      `    # Support des WebSockets`,
+      `    @websockets {`,
+      `        header Connection *Upgrade*`,
+      `        header Upgrade websocket`,
+      `    }`,
+      `    reverse_proxy @websockets ${target}`,
+      `}`
+    ];
+    return lines.join('\\n');
+  }
 
-    # Support des WebSockets
-    @websockets {
-        header Connection *Upgrade*
-        header Upgrade websocket
-    }
-    reverse_proxy @websockets ${target}
-}`;
-  }
   if (prefix === 'connector.rdrive' || prefix === 'document.rdrive') {
-    return `${host} {
-    reverse_proxy /* ${target}
-}`;
+    const lines = [
+      `${host} {`,
+      `    reverse_proxy /* ${target}`,
+      `}`
+    ];
+    return lines.join('\\n');
   }
+
   return null;
 }
 
@@ -212,9 +225,22 @@ app.post('/api/register', (req, res) => {
       const existingBlockMarkers = (preText.match(/^# BLOCK\\s+\\d+/gmi) || []).length;
       const blockNumber = existingBlockMarkers + 1;
 
-      // Build the complete content to append with proper formatting
-      const header = `# BLOCK ${blockNumber} - backendHost=${backendHost || 'custom targets'} machineId=${machineId || ''} time=${new Date().toISOString()}`;
-      const contentToAppend = `\\n${header}\\n\\n${blocks.join('\\n\\n')}\\n`;
+      // Build the complete content to append
+      const parts = [];
+      parts.push(''); // Empty line before block comment
+      parts.push(`# BLOCK ${blockNumber} - backendHost=${backendHost || 'custom targets'} machineId=${machineId || ''} time=${new Date().toISOString()}`);
+      parts.push(''); // Empty line after block comment
+
+      // Add all the blocks with empty lines between them
+      for (let i = 0; i < blocks.length; i++) {
+        parts.push(blocks[i]);
+        if (i < blocks.length - 1) {
+          parts.push(''); // Empty line between blocks
+        }
+      }
+
+      // Join everything with newlines
+      const contentToAppend = parts.join('\\n') + '\\n';
 
       appendToCaddyfile(contentToAppend);
       console.log(`New registration added for ${backendHost || 'custom targets'}; Caddy should auto-reload via --watch`);
