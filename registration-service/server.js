@@ -107,7 +107,7 @@ function makeSiteBlock(host, target) {
     `    reverse_proxy ${target}`,
     `}`
   ];
-  return lines.join('\\n');
+  return lines.join('\n');
 }
 
 function makeSpecialBlock(prefix, host, target) {
@@ -124,7 +124,7 @@ function makeSpecialBlock(prefix, host, target) {
       `    reverse_proxy @websockets ${target}`,
       `}`
     ];
-    return lines.join('\\n');
+    return lines.join('\n');
   }
 
   if (prefix === 'connector.rdrive' || prefix === 'document.rdrive') {
@@ -133,7 +133,7 @@ function makeSpecialBlock(prefix, host, target) {
       `    reverse_proxy /* ${target}`,
       `}`
     ];
-    return lines.join('\\n');
+    return lines.join('\n');
   }
 
   return null;
