@@ -8,3 +8,16 @@ curl -X POST http://driss.ryvie.fr:8088/api/register \
     "backendHost": "100.90.20.50",
     "services": ["rdrive", "rtransfer", "rdrop", "rpictures"]
   }'
+curl -X POST http://driss.ryvie.fr:8088/api/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "machineId": "abc123",
+    "arch": "amd64",
+    "os": "linux",
+    "backendHost": "100.90.20.50",
+    "services": [
+      "rdrive", "rtransfer", "rdrop", "rpictures",
+      "app", "status",
+      "backend.rdrive", "connector.rdrive", "document.rdrive"
+    ]
+  }'

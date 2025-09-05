@@ -83,10 +83,11 @@ app.post('/api/register', (req, res) => {
     let id = '';
     if (backendHost) {
       const text = getCaddyText();
-      const re = new RegExp(`\\n([a-z]+)\\.([a-z0-9-]+)\\.${escapedDomain} \\{[\\s\\S]*?reverse_proxy\\s+${escapeRegExp(backendHost)}:`, 'i');
+      // Match any service label (may contain dots), then a second label that must be exactly 8 lowercase alnum chars (our id)
+      const re = new RegExp(`\n[^\s]+\.([a-z0-9]{8})\.${escapedDomain} \{[\s\S]*?reverse_proxy\s+${escapeRegExp(backendHost)}:`, 'i');
       const m = text.match(re);
-      if (m && m[2]) {
-        id = m[2];
+      if (m && m[1]) {
+        id = m[1];
       }
     }
     // If no existing id found, generate a unique one (attempts up to 5 times)
