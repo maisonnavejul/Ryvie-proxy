@@ -28,6 +28,11 @@ const DEFAULT_TARGETS = {
   rtransfer: process.env.TARGET_RTRANSFER || '100.90.20.50:3011',
   rdrop: process.env.TARGET_RDROP || '100.90.20.50:8080',
   rpictures: process.env.TARGET_RPICTURES || '100.90.20.50:2283',
+  app: process.env.TARGET_APP || '100.90.20.50:3000',
+  status: process.env.TARGET_STATUS || '100.90.20.50:3002',
+  'backend.rdrive': process.env.TARGET_BACKEND_RDRIVE || '100.90.20.50:4000',
+  'connector.rdrive': process.env.TARGET_CONNECTOR_RDRIVE || '100.90.20.50:5000',
+  'document.rdrive': process.env.TARGET_DOCUMENT_RDRIVE || '100.90.20.50:8090',
 };
 
 // Utility: append to Caddyfile atomically
@@ -52,6 +57,16 @@ function isIdUsed(id) {
 
 function makeSiteBlock(host, target) {
   return `\n${host} {\n    reverse_proxy ${target}\n}\n`;
+}
+
+function makeSpecialBlock(prefix, host, target) {
+  if (prefix === 'backend.rdrive') {
+    return `\n${host} {\n    reverse_proxy /* ${target}\n\n    # Support des WebSockets\n    @websockets {\n        header Connection *Upgrade*\n        header Upgrade websocket\n    }\n    reverse_proxy @websockets ${target}\n}\n`;
+  }
+  if (prefix === 'connector.rdrive' || prefix === 'document.rdrive') {
+    return `\n${host} {\n    reverse_proxy /* ${target}\n}\n`;
+  }
+  return null;
 }
 
 app.post('/api/register', (req, res) => {
@@ -96,7 +111,17 @@ app.post('/api/register', (req, res) => {
     const domains = {};
     const blocks = [];
     // Known service -> default port mapping for constructing targets from backendHost
-    const SERVICE_PORTS = { rdrive: 3010, rtransfer: 3011, rdrop: 8080, rpictures: 2283 };
+    const SERVICE_PORTS = {
+      rdrive: 3010,
+      rtransfer: 3011,
+      rdrop: 8080,
+      rpictures: 2283,
+      app: 3000,
+      status: 3002,
+      'backend.rdrive': 4000,
+      'connector.rdrive': 5000,
+      'document.rdrive': 8090,
+    };
 
     // Helper: does a block already exist for this service + id?
     const caddyTextBefore = getCaddyText();
@@ -130,7 +155,8 @@ app.post('/api/register', (req, res) => {
       if (hasServiceBlock(prefix, id, backendHost ? `${backendHost}:${SERVICE_PORTS[prefix]}` : undefined)) {
         continue;
       }
-      blocks.push(makeSiteBlock(host, target));
+      const special = makeSpecialBlock(prefix, host, target);
+      blocks.push(special || makeSiteBlock(host, target));
     }
 
     // Write blocks and reload Caddy
