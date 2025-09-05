@@ -18,7 +18,7 @@ app.use(express.json());
 
 // Config
 const PORT = process.env.PORT || 8088;
-const CADDYFILE_PATH = process.env.CADDYFILE_PATH || '/etc/caddy/Caddyfile';
+const CADDYFILE_PATH = process.env.CADDYFILE_PATH || '/home/ubuntu/Caddyfile';
 const CADDY_RELOAD_CMD = process.env.CADDY_RELOAD_CMD || `caddy reload --config ${CADDYFILE_PATH}`;
 const BASE_DOMAIN = process.env.BASE_DOMAIN || 'ryvie.fr';
 
