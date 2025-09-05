@@ -79,17 +79,32 @@ app.post('/api/register', (req, res) => {
     // Allow caller to pass a backend host/IP (e.g., via curl) that we use to form targets per service
     const backendHost = req.body?.backendHost || req.body?.backendIp || req.body?.ip;
 
-    // Generate a unique ID (attempts up to 5 times)
+    // Utilities for dedup
+    const escapedDomain = BASE_DOMAIN.replace(/\./g, '\\.');
+    const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const getCaddyText = () => (fs.existsSync(CADDYFILE_PATH) ? fs.readFileSync(CADDYFILE_PATH, 'utf8') : '');
+    // Try to find an existing id for this backendHost
     let id = '';
-    for (let i = 0; i < 5; i++) {
-      const candidate = nanoid(8).toLowerCase();
-      if (!isIdUsed(candidate)) {
-        id = candidate;
-        break;
+    if (backendHost) {
+      const text = getCaddyText();
+      const re = new RegExp(`\\n([a-z]+)\\.([a-z0-9-]+)\\.${escapedDomain} \\{[\\s\\S]*?reverse_proxy\\s+${escapeRegExp(backendHost)}:`, 'i');
+      const m = text.match(re);
+      if (m && m[2]) {
+        id = m[2];
       }
     }
+    // If no existing id found, generate a unique one (attempts up to 5 times)
     if (!id) {
-      return res.status(500).json({ error: 'id_generation_failed', details: 'Could not generate a unique id' });
+      for (let i = 0; i < 5; i++) {
+        const candidate = nanoid(8).toLowerCase();
+        if (!isIdUsed(candidate)) {
+          id = candidate;
+          break;
+        }
+      }
+      if (!id) {
+        return res.status(500).json({ error: 'id_generation_failed', details: 'Could not generate a unique id' });
+      }
     }
 
     const requested = Array.isArray(services)
@@ -101,6 +116,17 @@ app.post('/api/register', (req, res) => {
     const blocks = [];
     // Known service -> default port mapping for constructing targets from backendHost
     const SERVICE_PORTS = { rdrive: 3010, rtransfer: 3011, rdrop: 8080, rpictures: 2283 };
+
+    // Helper: does a block already exist for this service + id?
+    const caddyTextBefore = getCaddyText();
+    function hasServiceBlock(prefix, idToCheck, expectedHost) {
+      const host = `${prefix}.${idToCheck}.${BASE_DOMAIN}`;
+      const hostRe = new RegExp(`\\n${escapeRegExp(host)} \\{[\\s\\S]*?\\n\\}`, 'i');
+      if (!hostRe.test(caddyTextBefore)) return false;
+      if (!expectedHost) return true;
+      const targetRe = new RegExp(`\\n${escapeRegExp(host)} \\{[\\s\\S]*?reverse_proxy\\s+${escapeRegExp(expectedHost)}(?:\\s|$)`, 'i');
+      return targetRe.test(caddyTextBefore);
+    }
 
     for (const svc of requested) {
       const prefix = String(svc).toLowerCase();
@@ -119,12 +145,21 @@ app.post('/api/register', (req, res) => {
 
       if (!target) continue;
       domains[prefix] = host;
+      // Skip creating if block already present for this service/id and points to this target (when backendHost provided)
+      if (hasServiceBlock(prefix, id, backendHost ? `${backendHost}:${SERVICE_PORTS[prefix]}` : undefined)) {
+        continue;
+      }
       blocks.push(makeSiteBlock(host, target));
     }
 
     // Write blocks and reload Caddy
     if (blocks.length > 0) {
-      appendToCaddyfile(blocks.join('\n'));
+      // Prepend a numbered comment for traceability
+      const preText = getCaddyText();
+      const existingBlockMarkers = (preText.match(/^# BLOCK\s+\d+/gmi) || []).length;
+      const blockNumber = existingBlockMarkers + 1;
+      const header = `\n# BLOCK ${blockNumber} - backendHost=${backendHost || 'custom targets'} machineId=${machineId || ''} time=${new Date().toISOString()}\n`;
+      appendToCaddyfile(header + blocks.join('\n'));
       exec(CADDY_RELOAD_CMD, (err, stdout, stderr) => {
         if (err) {
           console.error('Caddy reload failed:', err, stderr);
