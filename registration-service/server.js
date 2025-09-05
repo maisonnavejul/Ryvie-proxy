@@ -18,7 +18,7 @@ app.use(express.json());
 
 // Config
 const PORT = process.env.PORT || 8088;
-const CADDYFILE_PATH = process.env.CADDYFILE_PATH || '/home/ubuntu/Caddyfile';
+const CADDYFILE_PATH = process.env.CADDYFILE_PATH || '/root/Caddyfile';
 const CADDY_RELOAD_CMD = process.env.CADDY_RELOAD_CMD || `caddy reload --config ${CADDYFILE_PATH}`;
 const BASE_DOMAIN = process.env.BASE_DOMAIN || 'ryvie.fr';
 
@@ -160,7 +160,7 @@ app.post('/api/register', (req, res) => {
       blocks.push(special || makeSiteBlock(host, target));
     }
 
-    // Write blocks and deploy into Docker container (copy Caddyfile into root_caddy_1 and restart)
+    // Write blocks; Caddy is configured to auto-reload on file changes via bind mount
     if (blocks.length > 0) {
       // Prepend a numbered comment for traceability
       const preText = getCaddyText();
@@ -168,22 +168,7 @@ app.post('/api/register', (req, res) => {
       const blockNumber = existingBlockMarkers + 1;
       const header = `\n# BLOCK ${blockNumber} - backendHost=${backendHost || 'custom targets'} machineId=${machineId || ''} time=${new Date().toISOString()}\n`;
       appendToCaddyfile(header + blocks.join('\n'));
-      const copyCmd = `sudo docker cp ${CADDYFILE_PATH} root_caddy_1:/etc/caddy/Caddyfile`;
-      const restartCmd = `sudo docker restart root_caddy_1`;
-      exec(copyCmd, (err, stdout, stderr) => {
-        if (err) {
-          console.error('Docker copy failed:', err, stderr);
-        } else {
-          console.log('Docker copy completed:', stdout);
-          exec(restartCmd, (err2, stdout2, stderr2) => {
-            if (err2) {
-              console.error('Docker restart failed:', err2, stderr2);
-            } else {
-              console.log('Docker restarted:', stdout2);
-            }
-          });
-        }
-      });
+      console.log('Caddyfile updated; Caddy should auto-reload via --watch');
     }
 
     // Static driss.ryvie.fr blocks removed; only dynamic registrations are written.
