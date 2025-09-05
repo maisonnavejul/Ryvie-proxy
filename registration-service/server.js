@@ -50,13 +50,17 @@ const SERVICE_PORTS = {
 // Utility: append to Caddyfile atomically
 function appendToCaddyfile(content) {
   const current = fs.existsSync(CADDYFILE_PATH) ? fs.readFileSync(CADDYFILE_PATH, 'utf8') : '';
-
-  // Ensure proper line ending
-  let updated = current;
-  if (current.length > 0 && !current.endsWith('\\n')) {
-    updated += '\\n';
+  
+  // Normalize line endings and ensure exactly one newline at the end
+  const normalizedCurrent = current.replace(/\r\n|\r/g, '\n').replace(/\n+$/, '');
+  const normalizedContent = content.replace(/\r\n|\r/g, '\n').replace(/\n+$/, '');
+  
+  // Combine with exactly two newlines between blocks
+  let updated = normalizedCurrent;
+  if (normalizedCurrent && normalizedContent) {
+    updated += '\n\n';
   }
-  updated += content;
+  updated += normalizedContent + '\n';
 
   fs.writeFileSync(CADDYFILE_PATH, updated, 'utf8');
 }
@@ -232,15 +236,10 @@ app.post('/api/register', (req, res) => {
       parts.push(''); // Empty line after block comment
 
       // Add all the blocks with empty lines between them
-      for (let i = 0; i < blocks.length; i++) {
-        parts.push(blocks[i]);
-        if (i < blocks.length - 1) {
-          parts.push(''); // Empty line between blocks
-        }
-      }
+      parts.push(blocks.join('\n\n'));
 
-      // Join everything with newlines
-      const contentToAppend = parts.join('\\n') + '\\n';
+      // Join everything with newlines and ensure proper line endings
+      const contentToAppend = parts.join('\n') + '\n';
 
       appendToCaddyfile(contentToAppend);
       console.log(`New registration added for ${backendHost || 'custom targets'}; Caddy should auto-reload via --watch`);
