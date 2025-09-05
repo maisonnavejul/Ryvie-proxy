@@ -54,25 +54,6 @@ function makeSiteBlock(host, target) {
   return `\n${host} {\n    reverse_proxy ${target}\n}\n`;
 }
 
-// Ensure static blocks for driss.ryvie.fr are present in the Caddyfile
-const STATIC_MARKER_BEGIN = '# BEGIN STATIC DRISS BLOCKS';
-const STATIC_MARKER_END = '# END STATIC DRISS BLOCKS';
-const STATIC_BLOCKS = `\n${STATIC_MARKER_BEGIN}\nportainer.driss.ryvie.fr {\n    reverse_proxy 100.90.20.50:9000\n}\nrtransfer.driss.ryvie.fr {\n    reverse_proxy 100.90.20.50:3011\n}\nrdrop.driss.ryvie.fr {\n    reverse_proxy 100.90.20.50:8080\n}\n\nrpictures.driss.ryvie.fr {\n    reverse_proxy 100.90.20.50:2283\n}\n# principal\nrdrive.driss.ryvie.fr {\n    reverse_proxy /* 100.90.20.50:3010\n}\nbackend.rdrive.driss.ryvie.fr {\n    reverse_proxy /* 100.90.20.50:4000\n\n    # Support des WebSockets\n    @websockets {\n        header Connection *Upgrade*\n        header Upgrade websocket\n    }\n    reverse_proxy @websockets 100.90.20.50:4000\n}\n\n# OnlyOffice Connector\nconnector.rdrive.driss.ryvie.fr {\n    reverse_proxy /* 100.90.20.50:5000\n}\n\n# OnlyOffice Document Server\ndocument.rdrive.driss.ryvie.fr {\n    reverse_proxy /* 100.90.20.50:8090\n}\napp.driss.ryvie.fr {\n    reverse_proxy 100.90.20.50:3000\n}\nstatus.driss.ryvie.fr {\n    reverse_proxy 100.90.20.50:3002\n}\n${STATIC_MARKER_END}\n`;
-
-function ensureStaticBlocks() {
-  try {
-    const current = fs.existsSync(CADDYFILE_PATH) ? fs.readFileSync(CADDYFILE_PATH, 'utf8') : '';
-    if (current.includes(STATIC_MARKER_BEGIN) && current.includes(STATIC_MARKER_END)) {
-      return false; // already present
-    }
-    appendToCaddyfile(STATIC_BLOCKS);
-    return true;
-  } catch (e) {
-    console.error('Failed to ensure static Caddy blocks:', e);
-    return false;
-  }
-}
-
 app.post('/api/register', (req, res) => {
   try {
     const { machineId, arch, os, publicIp, services } = req.body || {};
@@ -169,17 +150,7 @@ app.post('/api/register', (req, res) => {
       });
     }
 
-    // After handling this request successfully, ensure static driss.ryvie.fr blocks exist (if missing)
-    // This will only run on successful calls, not at startup.
-    if (ensureStaticBlocks()) {
-      exec(CADDY_RELOAD_CMD, (err, stdout, stderr) => {
-        if (err) {
-          console.error('Caddy reload (static driss blocks) failed:', err, stderr);
-        } else {
-          console.log('Caddy reloaded (static driss blocks):', stdout);
-        }
-      });
-    }
+    // Static driss.ryvie.fr blocks removed; only dynamic registrations are written.
 
     return res.json({ id, domains, received: { machineId, arch, os, publicIp } });
   } catch (e) {
