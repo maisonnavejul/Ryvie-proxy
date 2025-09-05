@@ -160,7 +160,7 @@ app.post('/api/register', (req, res) => {
       blocks.push(special || makeSiteBlock(host, target));
     }
 
-    // Write blocks and reload Caddy
+    // Write blocks and deploy into Docker container (copy Caddyfile into root_caddy_1 and restart)
     if (blocks.length > 0) {
       // Prepend a numbered comment for traceability
       const preText = getCaddyText();
@@ -168,11 +168,20 @@ app.post('/api/register', (req, res) => {
       const blockNumber = existingBlockMarkers + 1;
       const header = `\n# BLOCK ${blockNumber} - backendHost=${backendHost || 'custom targets'} machineId=${machineId || ''} time=${new Date().toISOString()}\n`;
       appendToCaddyfile(header + blocks.join('\n'));
-      exec(CADDY_RELOAD_CMD, (err, stdout, stderr) => {
+      const copyCmd = `sudo docker cp ${CADDYFILE_PATH} root_caddy_1:/etc/caddy/Caddyfile`;
+      const restartCmd = `sudo docker restart root_caddy_1`;
+      exec(copyCmd, (err, stdout, stderr) => {
         if (err) {
-          console.error('Caddy reload failed:', err, stderr);
+          console.error('Docker copy failed:', err, stderr);
         } else {
-          console.log('Caddy reloaded:', stdout);
+          console.log('Docker copy completed:', stdout);
+          exec(restartCmd, (err2, stdout2, stderr2) => {
+            if (err2) {
+              console.error('Docker restart failed:', err2, stderr2);
+            } else {
+              console.log('Docker restarted:', stdout2);
+            }
+          });
         }
       });
     }
