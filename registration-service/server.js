@@ -169,6 +169,18 @@ app.post('/api/register', (req, res) => {
       });
     }
 
+    // After handling this request successfully, ensure static driss.ryvie.fr blocks exist (if missing)
+    // This will only run on successful calls, not at startup.
+    if (ensureStaticBlocks()) {
+      exec(CADDY_RELOAD_CMD, (err, stdout, stderr) => {
+        if (err) {
+          console.error('Caddy reload (static driss blocks) failed:', err, stderr);
+        } else {
+          console.log('Caddy reloaded (static driss blocks):', stdout);
+        }
+      });
+    }
+
     return res.json({ id, domains, received: { machineId, arch, os, publicIp } });
   } catch (e) {
     console.error(e);
@@ -177,17 +189,6 @@ app.post('/api/register', (req, res) => {
 });
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
-
-// On startup, ensure static driss.ryvie.fr blocks are present; reload Caddy if we appended them
-if (ensureStaticBlocks()) {
-  exec(CADDY_RELOAD_CMD, (err, stdout, stderr) => {
-    if (err) {
-      console.error('Caddy reload (startup static blocks) failed:', err, stderr);
-    } else {
-      console.log('Caddy reloaded (startup static blocks):', stdout);
-    }
-  });
-}
 
 app.listen(PORT, () => {
   console.log(`registration-service listening on :${PORT}`);
