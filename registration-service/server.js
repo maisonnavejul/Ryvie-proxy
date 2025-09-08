@@ -97,8 +97,8 @@ function isIdUsed(id) {
   try {
     if (!fs.existsSync(CADDYFILE_PATH)) return false;
     const text = fs.readFileSync(CADDYFILE_PATH, 'utf8');
-    const escapedDomain = BASE_DOMAIN.replace(/\\./g, '\\\\.');
-    const re = new RegExp(`\\\\.${id}\\\\.${escapedDomain}\\\\b`);
+    const escapedDomain = BASE_DOMAIN.replace(/\./g, '\\\\.');
+    const re = new RegExp(`\\.${id}\\.driss\\.${escapedDomain}\\b`);
     return re.test(text);
   } catch {
     return false;
@@ -122,11 +122,11 @@ function findIdByBackendHost(backendHost) {
   if (!backendHost || !fs.existsSync(CADDYFILE_PATH)) return null;
 
   const text = fs.readFileSync(CADDYFILE_PATH, 'utf8');
-  const escapedDomain = BASE_DOMAIN.replace(/\\./g, '\\\\.');
+  const escapedDomain = BASE_DOMAIN.replace(/\\./g, '\\\\\\.');
   const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
 
   // Look for any block with this IP
-  const re = new RegExp(`([a-z0-9]{8})\\\\.${escapedDomain} \\\\{[\\\\s\\\\S]*?reverse_proxy[^\\\\n]*${escapeRegExp(backendHost)}:`, 'i');
+  const re = new RegExp(`([a-z0-9]{8})\\.driss\\.${escapedDomain} \\\\{[\\\\s\\\\S]*?reverse_proxy[^\\\\n]*${escapeRegExp(backendHost)}:`, 'i');
   const m = text.match(re);
 
   return m && m[1] ? m[1] : null;
@@ -191,7 +191,7 @@ app.post('/api/register', async (req, res) => {
       for (const svc of requested) {
         const prefix = String(svc).toLowerCase();
         if (existingId) {
-          domains[prefix] = `${prefix}.${existingId}.${BASE_DOMAIN}`;
+          domains[prefix] = `${prefix}.${existingId}.driss.${BASE_DOMAIN}`;
         }
       }
 
@@ -228,7 +228,8 @@ app.post('/api/register', async (req, res) => {
 
     for (const svc of requested) {
       const prefix = String(svc).toLowerCase();
-      const host = `${prefix}.${id}.${BASE_DOMAIN}`;
+      // Add 'driss' before the base domain
+      const host = `${prefix}.${id}.driss.${BASE_DOMAIN}`;
 
       // Target priority: body.services[].target > backendHost:port (if provided) > DEFAULT_TARGETS
       let target;
@@ -253,7 +254,7 @@ app.post('/api/register', async (req, res) => {
     // Write blocks only if there are any and this is a new registration
     if (blocks.length > 0) {
       const preText = fs.existsSync(CADDYFILE_PATH) ? fs.readFileSync(CADDYFILE_PATH, 'utf8') : '';
-      const existingBlockMarkers = (preText.match(/^# BLOCK\\s+\\d+/gmi) || []).length;
+      const existingBlockMarkers = (preText.match(/^# BLOCK\s+\d+/gmi) || []).length;
       const blockNumber = existingBlockMarkers + 1;
 
       // Build the complete content to append
