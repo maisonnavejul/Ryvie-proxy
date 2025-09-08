@@ -18,7 +18,7 @@ app.use(express.json());
 // Config
 const PORT = process.env.PORT || 8088;
 const CADDYFILE_PATH = process.env.CADDYFILE_PATH || '/root/Caddyfile';
-const CADDY_RELOAD_CMD = process.env.CADDY_RELOAD_CMD || 'docker-compose exec caddy caddy reload --config /etc/caddy/Caddyfile';
+const CADDY_RELOAD_CMD = process.env.CADDY_RELOAD_CMD || 'docker-compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile';
 const BASE_DOMAIN = process.env.BASE_DOMAIN || 'ryvie.fr';
 
 // Default targets per service if not provided by client
