@@ -18,7 +18,7 @@ app.use(express.json());
 // Config
 const PORT = process.env.PORT || 8088;
 const CADDYFILE_PATH = process.env.CADDYFILE_PATH || '/root/Caddyfile';
-const CADDY_RELOAD_CMD = process.env.CADDY_RELOAD_CMD || `caddy reload --config ${CADDYFILE_PATH}`;
+const CADDY_RELOAD_CMD = process.env.CADDY_RELOAD_CMD || 'docker-compose exec caddy caddy reload --config /etc/caddy/Caddyfile';
 const BASE_DOMAIN = process.env.BASE_DOMAIN || 'ryvie.fr';
 
 // Default targets per service if not provided by client
@@ -47,8 +47,26 @@ const SERVICE_PORTS = {
   'document.rdrive': 8090,
 };
 
+// Reload Caddy configuration
+function reloadCaddy() {
+  return new Promise((resolve, reject) => {
+    console.log(`Executing: ${CADDY_RELOAD_CMD}`);
+    exec(CADDY_RELOAD_CMD, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`Error reloading Caddy: ${error.message}`);
+        return reject(error);
+      }
+      if (stderr) {
+        console.error(`Caddy stderr: ${stderr}`);
+      }
+      console.log(`Caddy reloaded successfully: ${stdout}`);
+      resolve(stdout);
+    });
+  });
+}
+
 // Utility: append to Caddyfile atomically
-function appendToCaddyfile(content) {
+async function appendToCaddyfile(content) {
   const current = fs.existsSync(CADDYFILE_PATH) ? fs.readFileSync(CADDYFILE_PATH, 'utf8') : '';
   
   // Normalize line endings and ensure exactly one newline at the end
@@ -62,7 +80,16 @@ function appendToCaddyfile(content) {
   }
   updated += normalizedContent + '\n';
 
+  // Write the updated Caddyfile
   fs.writeFileSync(CADDYFILE_PATH, updated, 'utf8');
+  
+  // Reload Caddy configuration
+  try {
+    await reloadCaddy();
+  } catch (error) {
+    console.error('Failed to reload Caddy configuration:', error);
+    throw error; // Re-throw to be caught by the caller
+  }
 }
 
 // Check whether an ID already appears in the Caddyfile hosts
@@ -143,7 +170,7 @@ function makeSpecialBlock(prefix, host, target) {
   return null;
 }
 
-app.post('/api/register', (req, res) => {
+app.post('/api/register', async (req, res) => {
   try {
     const { machineId, arch, os, publicIp, services } = req.body || {};
 
@@ -241,8 +268,8 @@ app.post('/api/register', (req, res) => {
       // Join everything with newlines and ensure proper line endings
       const contentToAppend = parts.join('\n') + '\n';
 
-      appendToCaddyfile(contentToAppend);
-      console.log(`New registration added for ${backendHost || 'custom targets'}; Caddy should auto-reload via --watch`);
+      await appendToCaddyfile(contentToAppend);
+      console.log(`New registration added for ${backendHost || 'custom targets'} and Caddy configuration reloaded`);
     }
 
     return res.json({
